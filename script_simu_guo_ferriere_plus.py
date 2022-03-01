@@ -6,6 +6,7 @@ import gc
 import logging
 import os, sys
 import time
+from pathlib import Path
 
 import numpy as np
 import astropy.units as u
@@ -20,8 +21,12 @@ from naima.models import PionDecay, InverseCompton, ExponentialCutoffPowerLaw, T
 from gammapy.maps import MapAxis
 from gammapy.utils.integrate import trapz_loglog
 
+#from clouds import Cloud_sphere, Cloud_ring, Cloud_ellipsoid, Cloud_cyllinder
+
 
 log = logging.getLogger(__name__)
+
+pathres = Path('../results')
 
 @click.group()
 @click.option("--log-level", default="INFO", type=click.Choice(["DEBUG", "INFO", "WARNING"]))
@@ -616,15 +621,23 @@ def plot_2Dmap(map2D, title, save=True, dist=8200):
     if save : plt.savefig("../2D_maps/"+title)
         
         
-def compute_map(cloud_atlas, nbins_3d, time=100*u.yr):
-    energies = np.geomspace(0.002,5000, 200)*u.TeV
+def compute_map(cloud_atlas, 
+                nbins_3d, 
+                title, 
+                time, 
+                min_energy,
+                max_energy,
+                energy_bin,
+                save=True):
+    
+    energies = np.geomspace(min_energy, max_energy, energy_bins)*u.TeV # ~5 bins par decade, 
     source = GCsource(cloud_atlas)
     
     log.info('- Calculating pion spectrum matrix')
     source.set_pion_spectrum_matrix2D(energies, time, nbins_3d, nbins_3d, nbins_3d)
         
     map_2D = np.zeros((len(source.ylin), len(source.zlin)))
-    hess_energies = np.geomspace(0.5,50,20)*u.TeV
+    hess_energies = np.geomspace(0.5,50,10)*u.TeV
     
     log.info('- Computing the VHE gamma map')
     for ny,y in enumerate(source.ylin):
@@ -636,31 +649,42 @@ def compute_map(cloud_atlas, nbins_3d, time=100*u.yr):
                 map_2D[ny,nz] = value
             gc.collect()
     
-    np.save('test',map_2D)
-    return map_2D
+    if save:
+        np.save(pathres/f'{title}_map_2D', map_2D)
+    else:
+        return map_2D
 
 
 @cli.command("run_sim", help="Simulate a VHE gamma image of the GC")
 @click.argument("n_atlas", default='1', type=int)
 @click.argument("spacebins", default='20', type=int)
-@click.argument("min_time", default='10 yr', type=u.Quantity)
-@click.argument("max_time", default='1000 yr', type=u.Quantity)
-@click.argument("timebins", default='1', type=int)
+@click.argument("min_time", default='100', type=float)
+@click.argument("max_time", default='1000', type=float)
+@click.argument("time_bins", default='1', type=int)
+@click.argument("min_energy", default='1', type=float)
+@click.argument("max_energy", default='1000', type=float)
+@click.argument("energy_bins", default='20', type=int)
 
 
-def run_sim(n_atlas, spacebins, min_time, max_time, timebins):
-    start = time.time()
+def run_sim(n_atlas, spacebins, min_time, max_time, time_bins, min_energy, max_energy, energy_bins):
+    start = time.perf_counter()
 
     cloud_atlases = create_ferriere_clouds()
-    times = np.geomspace(min_time, max_time, timebins)
+    times = np.geomspace(min_time*u.yr, max_time*u.yr, timebins)
     for t in times:
         log.info(f'Simulating the GC at {t}')
-        map_2D = compute_map(cloud_atlases[n_atlas], nbins_3d=spacebins, time=t)
-        plot_2Dmap(map_2D, title=f'real_clouds{n_atlas}_{spacebins}bins_{int(np.floor(t.value))}yrs.png')
+        compute_map(cloud_atlases[n_atlas], 
+                    nbins_3d=spacebins, 
+                    title=f'real_clouds{n_atlas}_{spacebins}bins_{int(np.floor(t.value))}yrs' ,
+                    time=t,
+                    min_energy=min_energy,
+                    max_energy=max_energy,
+                    energy_bin=energy_bins)
+        #plot_2Dmap(map_2D, title=f'real_clouds{n_atlas}_{spacebins}bins_{int(np.floor(t.value))}yrs.png')
         gc.collect()
         
-    end = time.time()
-    log.info(f'Time taken {end - start}')
+    end = time.perf_counter()
+    log.info(f'Time taken {end - start:0.1f}')
 
     
 if __name__ == "__main__":
