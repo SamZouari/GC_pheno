@@ -46,16 +46,8 @@ class Cloud_sphere:
         """Compute the average target density."""
         return self.mass/cst.m_p/self.volume 
     
-    def is_in_cloud(self, X, Y, Z):
-        x0, y0, z0 = self.center
-
-        xwidth = X[0,1,0] - X[0,0,0]
-        ywidth = Y[1,0,0] - Y[0,0,0]
-        zwidth = Z[0,0,1] - Z[0,0,0]
-
-        Xp, Yp, Zp = X/u.pc - x0 + xwidth.value/2, Y/u.pc - y0 + ywidth.value/2, Z/u.pc - z0 + zwidth.value/2
-
-        return np.sqrt(Xp**2 + Yp**2 + Zp**2) < self.radius.value
+    def is_in_cloud(self,x,y,z):
+        return np.sqrt(x**2+y**2+z**2) < self.radius.value
     
     @lazyproperty
     def coords(self):
@@ -110,24 +102,8 @@ class Cloud_ellipsoid:
         """Return target cloud volume."""
         return 1./6.*np.pi*self.lx*self.ly*self.lz
     
-    def is_in_cloud(self, X, Y, Z):
-        x0, y0, z0 = self.center
-
-        xwidth = X[0,1,0] - X[0,0,0]
-        ywidth = Y[1,0,0] - Y[0,0,0]
-        zwidth = Z[0,0,1] - Z[0,0,0]
-
-        Xp, Yp, Zp = X/u.pc - x0 + xwidth.value/2, Y/u.pc - y0 + ywidth.value/2, Z/u.pc - z0 + zwidth.value/2
-        
-        mat = np.array([Xp.ravel(), Yp.ravel(), Zp.ravel()]).T
-
-        mat_rot = self.rot_matrix.apply(mat)
-
-        Xp = mat_rot[...,0].reshape(X.shape)
-        Yp = mat_rot[...,1].reshape(Y.shape)
-        Zp = mat_rot[...,2].reshape(Z.shape)
-        
-        return np.sqrt( (Xp/self.lx.value)**2 + (Yp/self.ly.value)**2 + (Zp/self.lz.value)**2) < 1
+    def is_in_cloud(self,x,y,z):
+        return np.sqrt( (x/self.lx.value)**2 + (y/self.ly.value)**2 + (z/self.lz.value)**2) < 1
         
     @property
     def density(self):
@@ -189,30 +165,15 @@ class Cloud_ring:
         #return (rout+rin)*np.pi*((hin+hout)*(rout-rin))/2
         return 18*u.pc**3 #default
     
-    def is_in_cloud(self, X, Y, Z):
-        x0, y0, z0 = self.center
-
-        xwidth = X[0,1,0] - X[0,0,0]
-        ywidth = Y[1,0,0] - Y[0,0,0]
-        zwidth = Z[0,0,1] - Z[0,0,0]
-
-        Xp, Yp, Zp = X/u.pc - x0 + xwidth.value/2, Y/u.pc - y0 + ywidth.value/2, Z/u.pc - z0 + zwidth.value/2
-
-        mat = np.array([Xp.ravel(), Yp.ravel(), Zp.ravel()]).T
-
-        mat_rot = self.rot_matrix.apply(mat)
-
-        Xp = mat_rot[...,0].reshape(X.shape)
-        Yp = mat_rot[...,1].reshape(Y.shape)
-        Zp = mat_rot[...,2].reshape(Z.shape)
-        
-        r = np.sqrt(Xp**2 + Yp**2)#*u.pc
+    def is_in_cloud(self,x,y,z):
+        r = np.sqrt(x**2 + y**2)#*u.pc
+        z = z#*u.pc
         h = self.hin.value + (self.hout.value - self.hin.value)*(r - self.rin.value)/(self.rout.value - self.rin.value)
 
-        p1 = r < self.rout.value
-        p2 = r > self.rin.value
-        p3 = Zp < h/2
-        p4 = Zp > -h/2
+        p1 = r.value < self.rout.value
+        p2 = r.value > self.rin.value
+        p3 = z.value < h/2
+        p4 = z.value > -h/2
         return p1*p2*p3*p4
     
     @property
@@ -275,28 +236,11 @@ class Cloud_cylinder:
         """Compute the average target density."""
         return self.mass/cst.m_p/self.volume
     
-    def is_in_cloud(self, X, Y, Z):
-        x0, y0, z0 = self.center
-
-        xwidth = X[0,1,0] - X[0,0,0]
-        ywidth = Y[1,0,0] - Y[0,0,0]
-        zwidth = Z[0,0,1] - Z[0,0,0]
-
-        Xp, Yp, Zp = X/u.pc - x0 + xwidth.value/2, Y/u.pc - y0 + ywidth.value/2, Z/u.pc - z0 + zwidth.value/2
-
-        mat = np.array([Xp.ravel(), Yp.ravel(), Zp.ravel()]).T
-
-        mat_rot = self.rot_matrix.apply(mat)
-
-        Xp = mat_rot[...,0].reshape(X.shape)
-        Yp = mat_rot[...,1].reshape(Y.shape)
-        Zp = mat_rot[...,2].reshape(Z.shape)
-        
-        
-        p1 = Zp < self.l.value/2
-        p2 = Zp > -self.l.value/2
-        p3 = np.sqrt(Xp**2 + Yp*2) < self.r.value
-        
+    def is_in_cloud(self,x,y,z):
+        #x,y,z = x*u.pc, y*u.pc, z*u.pc
+        p1 = z.value < self.l.value/2
+        p2 = z.value > -self.l.value/2
+        p3 = np.sqrt(x.value**2 + y.value**2) < self.r.value
         return p1*p2*p3
     
     @lazyproperty
