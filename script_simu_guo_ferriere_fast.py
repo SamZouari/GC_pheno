@@ -99,7 +99,7 @@ class GCsource:
                  W0="1e48 erg", 
                  alpha=1.8,
                  e_cutoff="1 PeV",
-                 M_target="1e5 M_sun" , 
+                 M_target="1e5 M_sun" , #inutile
                  R_target="30 pc", 
                  d_target="8.2 kpc",
                  D0="1e27 cm2/s", 
@@ -184,6 +184,7 @@ class GCsource:
                                    ybin, 
                                    zbin):
         """Integrate proton spectrum over the line of sight."""
+        self.proton_energy = energy
         
         xlin = np.linspace(-self.R_target, self.R_target, xbin)
         ylin = np.linspace(-self.R_target, self.R_target, ybin)
@@ -192,7 +193,7 @@ class GCsource:
         self.ylin = ylin
         self.zlin = zlin
         
-        nh_ref = 1/u.cm**3
+        self.nh_ref = 1/u.cm**3
         
         bin_volume = (2*self.R_target)**3/(xbin*ybin*zbin)
         xbin_length = 2*self.R_target/xbin
@@ -206,19 +207,11 @@ class GCsource:
         
         spectra = self.proton_spectrum(energy, time, distance) 
 
-        spectrum_3D = spectra*bin_volume.to('cm3')*np.repeat(np.expand_dims(local_density, axis=0), len(energy), axis=0)/nh_ref
-        integrated_spectrum = np.sum(spectrum_3D, axis=2)
+        spectrum_3D = spectra*bin_volume.to('cm3')*np.repeat(np.expand_dims(local_density, axis=0), len(energy), axis=0)/self.nh_ref
         
-        #print(integrated_spectrum.unit)
-        
-        self.pion_decay_matrix2D = [] 
-        
-        for y in range(ybin):
-            self.pion_decay_matrix2D.append([])
-            for z in range(zbin):
-                    model = TableModel(energy, integrated_spectrum[:,y,z]) # can be 4D (energy on the 1st dim)
+        #passer en attribut
+        self.integrated_spectrum = np.sum(spectrum_3D, axis=2)
 
-                    self.pion_decay_matrix2D[y].append(PionDecay(model, nh=nh_ref))
         gc.collect()
     
 
@@ -229,12 +222,16 @@ class GCsource:
         return (W0/integral).to('')
      
         
-    def __call__(self, energies, y, z):
+    def __call__(self, photon_energies, y, z):
         """Return flux at given energies."""
         #idy, idz = find_nearest(self.fov_width, y), find_nearest(self.fov_width, z)
         idy, idz = find_nearest(self.ylin, y), find_nearest(self.zlin, z)
         
-        return self.pion_decay_matrix2D[idy][idz].flux(energies, self.d_target)
+        model = TableModel(self.proton_energy, self.integrated_spectrum[:,idy,idz]) # can be 4D (energy on the 1st dim)
+
+        pion_model = PionDecay(model, nh=self.nh_ref)
+        
+        return pion_model.flux(photon_energies, self.d_target)
     
     
     
@@ -369,7 +366,7 @@ def compute_map(cloud_atlas,
     """
     
     energies = np.geomspace(min_energy, max_energy, energy_bins)*u.TeV # ~5 bins par decade, 
-    source = GCsource(cloud_atlas)
+    source = GCsource(cloud_atlas)#rajouter R_target
     
     log.info('- Calculating pion spectrum matrix')
     source.set_pion_spectrum_matrix2D(energies, time, nbins_3d, nbins_3d, nbins_3d)
@@ -379,12 +376,12 @@ def compute_map(cloud_atlas,
     
     # utiliser des map gammapy plutôt
     
-    print(sys.getsizeof(source.pion_decay_matrix2D))
+    #print(sys.getsizeof(source.pion_decay_matrix2D))
     
     log.info('- Computing the VHE gamma map')
     for ny,y in enumerate(source.ylin): #fuite de mémoire
         for nz,z in enumerate(source.zlin):
-            value = np.sum(hess_energies*source(hess_energies, y/u.pc,z/u.pc)).to('s-1 cm-2').value
+            value = np.sum(hess_energies*source(hess_energies, y.to_value('pc'),z.to_value('pc'))).to('s-1 cm-2').value
             if np.isnan(value):
                 map_2D[ny,nz] = 0
             else:
@@ -444,7 +441,7 @@ def run_sim(n_atlas, spacebins, min_time, max_time, time_bins, min_energy, max_e
                     max_energy=max_energy,
                     energy_bins=energy_bins,
                     save=False)
-        plot_2Dmap(map_2D, title=f'real_clouds{n_atlas}_{spacebins}bins_{int(np.floor(t.value))}yrs.png')
+        plot_2Dmap(map_2D, title=f'real_clouds{n_atlas}_{spacebins}bins_{int(np.floor(t.value))}yrs_alt.png')
         gc.collect()
         
     end = time.perf_counter()
