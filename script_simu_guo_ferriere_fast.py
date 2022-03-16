@@ -205,11 +205,14 @@ class GCsource:
         
         distance = np.sqrt(X**2 + Y**2 + Z**2)
         
+        log.info('- Computing "spectra"')
         spectra = self.proton_spectrum(energy, time, distance) 
-
+        
+        log.info('- Computing "spectrum_3D"')
         spectrum_3D = spectra*bin_volume.to('cm3')*np.repeat(np.expand_dims(local_density, axis=0), len(energy), axis=0)/self.nh_ref
         
-        #passer en attribut
+        
+        log.info('- Computing "integrated_spectrum')
         self.integrated_spectrum = np.sum(spectrum_3D, axis=2)
 
         gc.collect()
@@ -244,13 +247,23 @@ def calculate_local_density_allclouds(X, Y, Z, cloud_atlas):
     for cloud in cloud_atlas:
         k += 1
         log.info(f'- - Calculating density for cloud {k} of {n}')
+        
+        #valid_map = np.zeros_like(X, dtype=bool)/u.pc
+        #nh_map = np.zeros_like(X)/(u.pc*u.cm**3)
+        density = cloud.density.to('cm-3')
+
+        valid_map = cloud.is_in_cloud(X, Y, Z)
+        nh_map = valid_map*density
+    
+        
         #valid_map, nh_map = calculate_local_density_1cloud(X,Y,Z, cloud)
-        nh_map = calculate_local_density_1cloud(X,Y,Z, cloud)
+        #nh_map = calculate_local_density_1cloud(X,Y,Z, cloud)
         #valid_map_tot = valid_map_tot + valid_map
+        
         nh_map_tot = nh_map_tot + nh_map
         
         del nh_map
-        #del valid_map
+        del valid_map
         gc.collect()
 
     #return valid_map_tot, nh_map_tot
@@ -379,6 +392,8 @@ def compute_map(cloud_atlas,
     #print(sys.getsizeof(source.pion_decay_matrix2D))
     
     log.info('- Computing the VHE gamma map')
+    tot = len(source.ylin)*len(source.zlin)
+    k = 0
     for ny,y in enumerate(source.ylin): #fuite de mémoire
         for nz,z in enumerate(source.zlin):
             value = np.sum(hess_energies*source(hess_energies, y.to_value('pc'),z.to_value('pc'))).to('s-1 cm-2').value
@@ -386,6 +401,8 @@ def compute_map(cloud_atlas,
                 map_2D[ny,nz] = 0
             else:
                 map_2D[ny,nz] = value
+            k+=1
+            print(f'{k/tot*100:0.2f} %', end='\r')
             gc.collect()
     
     if save:
