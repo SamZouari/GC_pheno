@@ -371,11 +371,18 @@ def compute_map(cloud_atlas,
                      width=width.to('deg'), axes=[energy_axis])
     
 
-    map_2D_density_np = np.sum(source.local_density, axis=1)
+    map_2D_density_np1 = np.sum(source.local_density, axis=1)
+    map_2D_density_np0 = np.sum(source.local_density, axis=0)
+    map_2D_density_np2 = np.sum(source.local_density, axis=2)
 
     map_2D_density_wcs = Map.create(binsz=binsize.to('deg'), map_type='wcs', skydir=position, frame='icrs', width=width.to('deg'))
-    map_2D_density_wcs.data = map_2D_density_np.value
-    map_2D_density_wcs.write(pathres/f'density_{title}.fits', overwrite=True)
+    
+    map_2D_density_wcs.data = map_2D_density_np1.value
+    map_2D_density_wcs.write(pathres/f'density_{title}_1.fits', overwrite=True)
+    map_2D_density_wcs.data = map_2D_density_np0.value
+    map_2D_density_wcs.write(pathres/f'density_{title}_0.fits', overwrite=True)
+    map_2D_density_wcs.data = map_2D_density_np2.value
+    map_2D_density_wcs.write(pathres/f'density_{title}_2.fits', overwrite=True)
     
     
     log.info('- Computing the VHE gamma map')
