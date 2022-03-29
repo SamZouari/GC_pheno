@@ -18,15 +18,16 @@ from astropy.table import Table
 from scipy.spatial.transform import Rotation as R
 
 from naima.models import PionDecay, InverseCompton, ExponentialCutoffPowerLaw, TableModel
-from gammapy.maps import Map,MapAxis
+from gammapy.maps import Map, MapAxis, WcsGeom
 from gammapy.utils.integrate import trapz_loglog
 
-from clouds import Cloud_sphere, Cloud_ring, Cloud_ellipsoid, Cloud_cylinder
+from clouds import Cloud_sphere, Cloud_ring, Cloud_ellipsoid, Cloud_cylinder, create_ferriere_clouds
 
 
 log = logging.getLogger(__name__)
 
 pathres = Path('../2D_maps')
+
 
 @click.group()
 @click.option("--log-level", default="INFO", type=click.Choice(["DEBUG", "INFO", "WARNING"]))
@@ -96,12 +97,14 @@ class GCsource:
     """
     def __init__(self, 
                  cloud_atlas,
+                 base_geom,
+                 binsize_pc,
                  W0="1e48 erg", 
                  alpha=1.8,
                  e_cutoff="1 PeV",
-                 M_target="1e5 M_sun" , #inutile
-                 R_target="30 pc", 
-                 d_target="8.2 kpc",
+                 #M_target="1e5 M_sun" , #inutile
+                 #R_target="30 pc", 
+                 d_target="8.122 kpc",
                  D0="1e27 cm2/s", 
                  Eref="10 GeV",
                  diff_index=0.3):
@@ -112,9 +115,13 @@ class GCsource:
         self.D0 = u.Quantity(D0)
         self.Eref = u.Quantity(Eref)
         self.diff_index = u.Quantity(diff_index)
-        self.M_target = u.Quantity(M_target)
-        self.R_target = u.Quantity(R_target)
+        
+        self.base_geom = base_geom
+        self.binsize_pc = binsize_pc
+        #self.M_target = u.Quantity(M_target)
+        #self.R_target = u.Quantity(R_target)
         self.d_target = u.Quantity(d_target)
+        
         self.cloud_atlas = cloud_atlas
         
         self.injection_model = ExponentialCutoffPowerLaw(
@@ -126,16 +133,16 @@ class GCsource:
         self.injection_model.amplitude *= self.compute_norm(self.injection_model,self.W0)
 
         
-    @property
-    def volume(self):
-        """Return target cloud volume."""
-        return 4./3.*np.pi*self.R_target**3
+    #@property
+    #def volume(self):
+    #    """Return target cloud volume."""
+    #    return 4./3.*np.pi*self.R_target**3
      
         
-    @property
-    def density(self):
-        """Compute the average target density."""
-        return self.M_target/cst.m_p/self.volume
+    #@property
+    #def density(self):
+    #    """Compute the average target density."""
+    #    return self.M_target/cst.m_p/self.volume
      
         
     def diff_coeff(self, energy):
@@ -179,10 +186,10 @@ class GCsource:
         return injection*((np.sqrt(2*np.pi)*rdiff)**-3 * np.exp(-0.5*(distance/rdiff)**2))
 
                     
-    def set_pion_spectrum_matrix2D(self, energy, time, 
-                                   xbin, 
-                                   ybin, 
-                                   zbin):
+    def set_pion_spectrum_matrix2D_old(self, energy, time):#,
+                                   #xbin, 
+                                   #ybin, 
+                                   #zbin):
         """Integrate proton spectrum over the line of sight."""
         self.proton_energy = energy
         
@@ -216,6 +223,59 @@ class GCsource:
 
         gc.collect()
     
+    
+    def set_pion_spectrum_map(self, energy, time):
+        self.proton_energy = energy
+        
+        center_pos = SkyCoord(self.base_geom.center_skydir, distance= self.base_geom.center_coord[2])
+        center = center_pos.galactocentric
+        
+        coord = self.base_geom.get_coord()
+        skyc = SkyCoord(coord['lon'], coord['lat'], frame=self.base_geom.frame, distance=coord['los']).galactocentric
+
+        coord_los = skyc.x - center.x
+        coord_lon = skyc.y - center.y
+        coord_lat = skyc.z - center.z
+        xbin, ybin, zbin = self.base_geom.data_shape
+        self.x_space = np.linspace(-xbin*self.binsize_pc, xbin*self.binsize_pc, xbin)
+        self.y_space = np.linspace(-ybin*self.binsize_pc, ybin*self.binsize_pc, ybin)
+        self.z_space = np.linspace(-zbin*self.binsize_pc, zbin*self.binsize_pc, zbin)
+        
+        self.nh_ref = 1/u.cm**3
+        bin_volume = self.binsize_pc**3
+        
+        X,Y,Z = coord_los.to('pc'), coord_lon.to('pc'), coord_lat.to('pc')
+        
+        self.local_density = calculate_local_density_allclouds(X, Y, Z, self.cloud_atlas)
+        
+        distance = np.sqrt(X**2 + Y**2 + Z**2)
+        
+        spectra = self.proton_spectrum(energy, time, distance) 
+        
+        spectrum_3D = spectra*bin_volume.to('cm3')*np.repeat(np.expand_dims(self.local_density, axis=0), len(energy), axis=0)/self.nh_ref
+        #print(spectrum_3D.shape)
+        self.integrated_spectrum = np.sum(spectrum_3D, axis=1)
+        #print(self.integrated_spectrum.shape)
+        gc.collect()
+        
+        
+    def draw_density_maps(self):# éventuellement
+        
+        map_2D_density_np1 = np.sum(local_density, axis=1)
+        map_2D_density_np0 = np.sum(local_density, axis=0)
+        map_2D_density_np2 = np.sum(local_density, axis=2)
+
+        map_2D_density_wcs_front = Map.create(binsz=binsize_deg, map_type='wcs', skydir=position, frame='icrs', npix=nbins_3d)
+        
+        map_2D_density_wcs_side = Map.create(binsz=binsize_deg, map_type='wcs', skydir=position, frame='icrs', npix=nbins_3d)# attention aux dimensions
+
+        map_2D_density_wcs_front.data = map_2D_density_np0.value
+        map_2D_density_wcs_front.write(pathres/f'density_{title}_yz.fits', overwrite=True)
+        map_2D_density_wcs_side.data = map_2D_density_np1.value
+        map_2D_density_wcs_side.write(pathres/f'density_{title}_zx.fits', overwrite=True)
+        map_2D_density_wcs_side.data = map_2D_density_np2.value
+        map_2D_density_wcs_side.write(pathres/f'density_{title}_xy.fits', overwrite=True)
+    
 
     @staticmethod
     def compute_norm(model, W0, emin=1*u.GeV, emax=1*u.PeV, ndecade=100):
@@ -226,8 +286,7 @@ class GCsource:
         
     def __call__(self, photon_energies, y, z):
         """Return flux at given energies."""
-        #idy, idz = find_nearest(self.fov_width, y), find_nearest(self.fov_width, z)
-        idy, idz = find_nearest(self.ylin, y), find_nearest(self.zlin, z)
+        idy, idz = find_nearest(self.y_space, y), find_nearest(self.z_space, z)
         
         model = TableModel(self.proton_energy, self.integrated_spectrum[:,idy,idz]) # can be 4D (energy on the 1st dim)
 
@@ -271,143 +330,73 @@ def calculate_local_density_1cloud(X,Y,Z, cloud):
     
     return nh_map
 
-
-def create_ferriere_clouds(n_atlas):
-    SgrA_pos = (0,0,0) #origine
-    SgrA_est_pos = (-2.0,1.2,-1.5)
-    SC_pos = (8,-11,-5) #pas sûr pour x = 4-12 #souci sur l'axe z/dec
-    EC_pos = (-3,7,-4.5)
-
-    MR_pos = (3,-4,5) #b/w EC et SC
-    SS_pos = (3,-4,0) #b/w SC et CNR
-    WS_pos = (-2,-2,-2) #W bdy of SNR
-    NR_pos = (-3,5,2) #N bdy of SNR
-    
-    
-    CNR_rot = np.pi/2*np.array([+1/2.5,1/6,0]) #à peu près
-    SNR_rot = [0,0,0] #pas important
-    SC_rot = np.pi/2*np.array([1/6,0,0]) #ok
-
-    MR_rot = np.pi/2*np.array([1/4,1/4,-1/4])
-    SS_rot = np.pi/2*np.array([0,0,-1/4])
-    WS_rot =np.pi/2*np.array([0,0,0])
-    NR_rot = np.pi/2*np.array([0,0,0]) # pas important
-    
-    
-    mCC = (190+12+160)*u.M_sun
-    mCNR = 2e5*u.M_sun
-    mSNR = 19*u.M_sun
-    mhalo = 13000*u.M_sun
-    mSC = 2.2e5*u.M_sun
-    mEC = 1.9e5*u.M_sun
-
-    mMR = 6e4*u.M_sun
-    mSS = 1.6e4*u.M_sun
-    mWS = 4.5e3*u.M_sun
-    mNR = 2.2e3*u.M_sun
-    
-    CC = Cloud_ellipsoid(SgrA_pos, mCC, 
-                     '2.9 pc','2.9 pc','2.1 pc')
-    CNR = Cloud_ring(SgrA_pos, mCNR, rot_vec=CNR_rot)
-    SNR = Cloud_ellipsoid(SgrA_est_pos, mSNR,
-                         '9.0 pc', '9.0 pc', '6.7 pc',
-                         rot_vec=SNR_rot)
-    halo = Cloud_sphere(SgrA_est_pos, mhalo, '9 pc')
-    SC = Cloud_ellipsoid(SC_pos, mSC,
-                        '7.5 pc', '15 pc', '7.5 pc',
-                        rot_vec=SC_rot)
-    EC = Cloud_sphere(EC_pos, mEC, '4.5 pc')
-    MR = Cloud_cylinder(MR_pos, mMR, '9 pc', '1 pc',
-                   rot_vec=MR_rot)
-    SS = Cloud_cylinder(SS_pos, mSS, '7 pc', '1 pc',
-                       rot_vec=SS_rot)
-    WS = Cloud_cylinder(WS_pos, mWS, '8 pc', '0.5 pc',
-                       rot_vec=WS_rot)
-    NR = Cloud_cylinder(NR_pos, mNR, '4 pc', '0.5 pc',
-                       rot_vec=NR_rot)
-    
-    test = Cloud_sphere((0,5,5), mCNR, '5 pc')
-    test2 = Cloud_ellipsoid((0,-5,-5), mCNR, '2.9 pc','2.9 pc','2.1 pc', np.pi/2*np.array([1/6,0,0]))
-    
-    if n_atlas==0 :
-        return [test, test2]
-    if n_atlas==1 :
-        return [CC, CNR, SNR, halo, SC, EC]
-    if n_atlas==2 :
-        return [CC, CNR, SNR, halo, SC, EC, MR, SS, WS, NR] #plus complet, pas forcément utile
- 
         
 def compute_map(cloud_atlas, 
-                nbins_3d, 
+                plane_bins, los_bins, binsize_pc,
                 title, 
                 time, 
-                min_energy,max_energy,energy_bins,
-                photon_min_energy,photon_max_energy, photon_energy_bins, 
-                R_target):
+                min_energy, max_energy, energy_bins,
+                photon_min_energy, photon_max_energy, photon_energy_bins, 
+                ):
     """
     """
-    photon_energy_bins = 10 #en attendant
-    R_target = 30*u.pc
-    
 
-    energies = np.geomspace(min_energy, max_energy, energy_bins)*u.TeV # ~5 bins par decade, 
-    source = GCsource(cloud_atlas,R_target=R_target)
+    r_gal_cen = 8.122 * u.kpc
+    binsize_deg = np.arctan(binsize_pc/r_gal_cen).to('deg')
+    GC_pos = SkyCoord.from_name('SgrA*')
+    
+    xmax = binsize_pc*(los_bins+1)
+
+    proton_energies = np.geomspace(min_energy, max_energy, energy_bins)*u.TeV # ~5 bins par decade, 
+    
+    los = MapAxis.from_edges(r_gal_cen+np.linspace(-xmax, xmax, los_bins+1), unit="pc", name="los")
+
+    base_geom = WcsGeom.create(skydir=GC_pos, binsz=binsize_deg, npix=plane_bins, frame="galactic", axes=[los])
+    
+    source = GCsource(cloud_atlas, base_geom, binsize_pc)
     
     log.info('- Calculating pion spectrum matrix')
-    source.set_pion_spectrum_matrix2D(energies, time, nbins_3d, nbins_3d, nbins_3d)
-        
-    map_3D = np.zeros((photon_energy_bins, len(source.ylin), len(source.zlin)))
-    hess_energies = np.geomspace(photon_min_energy, photon_max_energy, photon_energy_bins)*u.TeV
+    source.set_pion_spectrum_map(proton_energies, time)
     
+    photon_energies = np.geomspace(photon_min_energy, photon_max_energy, photon_energy_bins)*u.TeV
+    map_np_fluxes = np.zeros((photon_energy_bins, plane_bins, plane_bins))
     
-    #position = SkyCoord(17.45, -29.0, frame='icrs', unit='deg')# appelé Sgr A* directement
-    position = SkyCoord.from_name('SgrA*')
-    energy_axis = MapAxis.from_bounds(photon_min_energy, photon_max_energy, photon_energy_bins, name='energy', unit='TeV')
+    photon_energy_axis = MapAxis.from_bounds(photon_min_energy, photon_max_energy, photon_energy_bins, name='energy', unit='TeV', interp='log')
+    map_wcs_fluxes = Map.create(binsz=binsize_deg, map_type='wcs', skydir=GC_pos, frame='galactic',
+                     npix=plane_bins, axes=[photon_energy_axis])
     
-    width = 2*R_target/source.d_target*u.rad
-    binsize = width/nbins_3d
-    
-    map_wcs = Map.create(binsz=binsize.to('deg'), map_type='wcs', skydir=position, frame='icrs',
-                     width=width.to('deg'), axes=[energy_axis])
-    
-
-    map_2D_density_np1 = np.sum(source.local_density, axis=1)
+    #source.draw_density_maps()
     map_2D_density_np0 = np.sum(source.local_density, axis=0)
-    map_2D_density_np2 = np.sum(source.local_density, axis=2)
-
-    map_2D_density_wcs = Map.create(binsz=binsize.to('deg'), map_type='wcs', skydir=position, frame='icrs', width=width.to('deg'))
-    
-    map_2D_density_wcs.data = map_2D_density_np1.value
-    map_2D_density_wcs.write(pathres/f'density_{title}_1.fits', overwrite=True)
+    map_2D_density_wcs = Map.create(binsz=binsize_deg, map_type='wcs', skydir=GC_pos, frame='galactic', npix=plane_bins)
     map_2D_density_wcs.data = map_2D_density_np0.value
-    map_2D_density_wcs.write(pathres/f'density_{title}_0.fits', overwrite=True)
-    map_2D_density_wcs.data = map_2D_density_np2.value
-    map_2D_density_wcs.write(pathres/f'density_{title}_2.fits', overwrite=True)
+    map_2D_density_wcs.write(pathres/f'density_{title}_yz.fits', overwrite=True)
     
     
     log.info('- Computing the VHE gamma map')
-    tot = len(source.ylin)*len(source.zlin)
+    tot = plane_bins**2
     k = 0
-    for ny,y in enumerate(source.ylin):
-        for nz,z in enumerate(source.zlin):
-            spectrum_value = source(hess_energies, y.to_value('pc'),z.to_value('pc')).to('s-1 TeV-1 cm-2').value
+    for ny,y in enumerate(source.y_space):
+        for nz,z in enumerate(source.z_space): #compter à l'envers ?
+            spectrum_value = source(photon_energies, y.to_value('pc'),z.to_value('pc')).to('s-1 TeV-1 cm-2').value
             if np.isnan(spectrum_value[0]):
-                map_3D[:,ny,nz] = np.zeros((photon_energy_bins))
+                map_np_fluxes[:,ny,nz] = np.zeros((photon_energy_bins))
             else:
-                map_3D[:,ny,nz] = spectrum_value
+                map_np_fluxes[:,ny,nz] = spectrum_value
             k+=1
             print(f'{k/tot*100:0.2f} %', end='\r')
             gc.collect()
     
-    map_wcs.data = map_3D #problème ici
+    map_wcs_fluxes.data = map_np_fluxes
     
-    map_wcs.write(pathres/f'flux_{title}.fits', overwrite=True)
+    map_wcs_fluxes.write(pathres/f'flux_{title}.fits', overwrite=True)
 
 
 
 @cli.command("run_sim", help="Simulate a VHE gamma image of the GC")
+
 @click.argument("n_atlas", default='1', type=int)
-@click.argument("spacebins", default='20', type=int)
+@click.argument("plane_bins", default='50', type=int)
+@click.argument("los_bins", default='50', type=int)
 @click.argument("min_time", default='100', type=float)
 @click.argument("max_time", default='1000', type=float)
 @click.argument("time_bins", default='1', type=int)
@@ -417,10 +406,10 @@ def compute_map(cloud_atlas,
 @click.argument("photon_min_energy", default='0.5', type=float)
 @click.argument("photon_max_energy", default='50', type=float)
 @click.argument("photon_energy_bins", default='15', type=int)
-@click.argument("R_target", default='30', type=int)
+@click.argument("binsize_pc", default='0.25', type=float)
 
-def run_sim(n_atlas, spacebins, min_time, max_time, time_bins, min_energy, max_energy, energy_bins,
-            photon_min_energy, photon_max_energy, photon_energy_bins, r_target):
+def run_sim(n_atlas, plane_bins, los_bins, min_time, max_time, time_bins, min_energy, max_energy, energy_bins,
+            photon_min_energy, photon_max_energy, photon_energy_bins, binsize_pc):
     
     """Main command : Simulate  a VHE gamma image of the GC, or any cloud/group of clouds
     
@@ -450,8 +439,9 @@ def run_sim(n_atlas, spacebins, min_time, max_time, time_bins, min_energy, max_e
     for t in times:
         log.info(f'Simulating the GC at {t}')
         map_2D = compute_map(cloud_atlas, 
-                    nbins_3d=spacebins, 
-                    title=f'real_clouds{n_atlas}_{spacebins}bins_{int(np.floor(t.value))}yrs' ,
+                    plane_bins=plane_bins, 
+                    los_bins = los_bins,
+                    title=f'real_clouds{n_atlas}_{plane_bins}bins_{int(np.floor(t.value))}yrs' ,
                     time=t,
                     min_energy=min_energy,
                     max_energy=max_energy,
@@ -459,7 +449,7 @@ def run_sim(n_atlas, spacebins, min_time, max_time, time_bins, min_energy, max_e
                     photon_min_energy=photon_min_energy,
                     photon_max_energy=photon_max_energy,
                     photon_energy_bins=photon_energy_bins,
-                    R_target=r_target*u.pc)
+                    binsize_pc=binsize_pc*u.pc)
         gc.collect()
         
     end = time.perf_counter()

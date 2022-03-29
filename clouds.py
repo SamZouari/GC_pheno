@@ -54,6 +54,7 @@ class Cloud_sphere:
         zwidth = Z[0,0,1] - Z[0,0,0]
 
         Xp, Yp, Zp = X/u.pc - x0 + xwidth.value/2, Y/u.pc - y0 + ywidth.value/2, Z/u.pc - z0 + zwidth.value/2
+        #Xp, Yp, Zp = X - x0 + xwidth/2, Y - y0 + ywidth/2, Z - z0 + zwidth/2
 
         return np.sqrt(Xp**2 + Yp**2 + Zp**2) < self.radius.value
     
@@ -118,6 +119,7 @@ class Cloud_ellipsoid:
         zwidth = Z[0,0,1] - Z[0,0,0]
 
         Xp, Yp, Zp = X/u.pc - x0 + xwidth.value/2, Y/u.pc - y0 + ywidth.value/2, Z/u.pc - z0 + zwidth.value/2
+        #Xp, Yp, Zp = X - x0 + xwidth/2, Y - y0 + ywidth/2, Z - z0 + zwidth/2
         
         mat = np.array([Xp.ravel(), Yp.ravel(), Zp.ravel()]).T
 
@@ -197,6 +199,7 @@ class Cloud_ring:
         zwidth = Z[0,0,1] - Z[0,0,0]
 
         Xp, Yp, Zp = X/u.pc - x0 + xwidth.value/2, Y/u.pc - y0 + ywidth.value/2, Z/u.pc - z0 + zwidth.value/2
+        #Xp, Yp, Zp = X - x0 + xwidth/2, Y - y0 + ywidth/2, Z - z0 + zwidth/2
 
         mat = np.array([Xp.ravel(), Yp.ravel(), Zp.ravel()]).T
 
@@ -283,6 +286,7 @@ class Cloud_cylinder:
         zwidth = Z[0,0,1] - Z[0,0,0]
 
         Xp, Yp, Zp = X/u.pc - x0 + xwidth.value/2, Y/u.pc - y0 + ywidth.value/2, Z/u.pc - z0 + zwidth.value/2
+        #Xp, Yp, Zp = X - x0 + xwidth/2, Y - y0 + ywidth/2, Z - z0 + zwidth/2
 
         mat = np.array([Xp.ravel(), Yp.ravel(), Zp.ravel()]).T
 
@@ -305,3 +309,80 @@ class Cloud_cylinder:
         coord = Galactocentric(x=pos[:, np.newaxis, np.newaxis], 
                            y=pos[np.newaxis,:,np.newaxis], 
                            z=pos[np.newaxis, np.newaxis, :])
+
+def create_test_clouds(n_atlas):
+    test = Cloud_sphere((0,5,5), 2*mCNR, '5 pc')
+    test2 = Cloud_ellipsoid((0,-5,-5), mCNR, '3 pc','3 pc','2 pc', np.pi/2*np.array([1/6,0,0]))
+    
+    if n_atlas==0 :
+        return [test, test2]
+    
+    
+def create_ferriere_clouds(n_atlas):
+    SgrA_pos = (0,0,0) #origine
+    SgrA_est_pos = (-2.0,1.2,-1.5)
+    SC_pos = (8,-11,-5) #pas sûr pour x = 4-12 #souci sur l'axe z/dec
+    EC_pos = (-3,7,-4.5)
+
+    MR_pos = (3,-4,5) #b/w EC et SC
+    SS_pos = (3,-4,0) #b/w SC et CNR
+    WS_pos = (-2,-2,-2) #W bdy of SNR
+    NR_pos = (-3,5,2) #N bdy of SNR
+    
+    
+    #CNR_rot = np.pi/2*np.array([+1/2.5,1/6,0]) #à peu près
+    CNR_rot = [0,0,0]
+    SNR_rot = [0,0,0] #pas important
+    #SC_rot = np.pi/2*np.array([1/6,0,0]) #ok
+    SC_rot = [0,0,0]
+
+    MR_rot = np.pi/2*np.array([1/4,1/4,-1/4])
+    SS_rot = np.pi/2*np.array([0,0,-1/4])
+    WS_rot =np.pi/2*np.array([0,0,0])
+    NR_rot = np.pi/2*np.array([0,0,0]) # pas important
+    
+    
+    mCC = (190+12+160)*u.M_sun
+    mCNR = 2e5*u.M_sun
+    mSNR = 19*u.M_sun
+    mhalo = 13000*u.M_sun
+    mSC = 2.2e5*u.M_sun
+    mEC = 1.9e5*u.M_sun
+
+    mMR = 6e4*u.M_sun
+    mSS = 1.6e4*u.M_sun
+    mWS = 4.5e3*u.M_sun
+    mNR = 2.2e3*u.M_sun
+    
+    CC = Cloud_ellipsoid(SgrA_pos, mCC, 
+                     '2.9 pc','2.9 pc','2.1 pc')
+    CNR = Cloud_ring(SgrA_pos, mCNR, rot_vec=CNR_rot)
+    SNR = Cloud_ellipsoid(SgrA_est_pos, mSNR,
+                         '9.0 pc', '9.0 pc', '6.7 pc',rot_vec=SNR_rot)
+    halo = Cloud_sphere(SgrA_est_pos, mhalo, '9 pc')
+    
+    SC = Cloud_ellipsoid(SC_pos, mSC,
+                        '7.5 pc', '15 pc', '7.5 pc',rot_vec=SC_rot)
+    EC = Cloud_sphere(EC_pos, mEC, '4.5 pc')
+    
+    
+    MR = Cloud_cylinder(MR_pos, mMR, '9 pc', '1 pc',
+                   rot_vec=MR_rot)
+    SS = Cloud_cylinder(SS_pos, mSS, '7 pc', '1 pc',
+                       rot_vec=SS_rot)
+    WS = Cloud_cylinder(WS_pos, mWS, '8 pc', '0.5 pc',
+                       rot_vec=WS_rot)
+    NR = Cloud_cylinder(NR_pos, mNR, '4 pc', '0.5 pc',
+                       rot_vec=NR_rot)
+    
+    test = Cloud_sphere((2,5,7), mCNR, '4 pc')
+    test2 = Cloud_ellipsoid((-2,-5,-7), mCNR, '3 pc','3 pc','2 pc', np.pi/2*np.array([1/6,0,0]))
+    
+    if n_atlas==0 :
+        return [test, test2]
+    if n_atlas==1 :
+        return [CC, CNR, SNR, halo, SC, EC]
+    if n_atlas==2 :
+        return [CC, CNR, SNR, halo, SC, EC, MR, SS, WS, NR] #plus complet, pas forcément utile
+    if n_atlas==3 :
+        return [EC, SC] # pour tester
